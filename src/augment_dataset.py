@@ -131,6 +131,12 @@ def parse_args() -> argparse.Namespace:
         help="Number of augmentation examples to visualize (0 for none)"
     )
     
+    parser.add_argument(
+        "--debug-mask",
+        action="store_true",
+        help="Enable debugging of mask loading/saving"
+    )
+    
     return parser.parse_args()
 
 
@@ -180,7 +186,10 @@ def create_augmentation_pipelines(config: Dict[str, Any]) -> Tuple[A.Compose, A.
             shift_limit=config['cat']['shift_limit'],
             p=config['cat']['shift_scale_rotate_prob'],
             border_mode=cv2.BORDER_CONSTANT,
-            value=0
+            value=0,
+            mask_value=0,
+            interpolation=cv2.INTER_LINEAR,
+            mask_interpolation=cv2.INTER_NEAREST  # Critical for mask value preservation
         ),
         
         # Elastic Transforms - Only for cats
@@ -189,17 +198,23 @@ def create_augmentation_pipelines(config: Dict[str, Any]) -> Tuple[A.Compose, A.
                 alpha=config['cat']['elastic']['alpha'],
                 sigma=config['cat']['elastic']['sigma'],
                 alpha_affine=config['cat']['elastic']['alpha_affine'],
-                p=config['cat']['elastic']['prob']
+                p=config['cat']['elastic']['prob'],
+                interpolation=cv2.INTER_LINEAR,
+                mask_interpolation=cv2.INTER_NEAREST  # Critical for mask value preservation
             ),
             A.GridDistortion(
                 num_steps=config['cat']['grid_distortion']['num_steps'],
                 distort_limit=config['cat']['grid_distortion']['distort_limit'],
-                p=config['cat']['grid_distortion']['prob']
+                p=config['cat']['grid_distortion']['prob'],
+                interpolation=cv2.INTER_LINEAR,
+                mask_interpolation=cv2.INTER_NEAREST  # Critical for mask value preservation
             ),
             A.OpticalDistortion(
                 distort_limit=config['cat']['optical_distortion']['distort_limit'],
                 shift_limit=config['cat']['optical_distortion']['shift_limit'],
-                p=config['cat']['optical_distortion']['prob']
+                p=config['cat']['optical_distortion']['prob'],
+                interpolation=cv2.INTER_LINEAR,
+                mask_interpolation=cv2.INTER_NEAREST  # Critical for mask value preservation
             )
         ], p=config['cat']['elastic_transform_prob']),
         
@@ -265,7 +280,10 @@ def create_augmentation_pipelines(config: Dict[str, Any]) -> Tuple[A.Compose, A.
             shift_limit=config['dog']['shift_limit'],
             p=config['dog']['shift_scale_rotate_prob'],
             border_mode=cv2.BORDER_CONSTANT,
-            value=0
+            value=0,
+            mask_value=0,
+            interpolation=cv2.INTER_LINEAR,
+            mask_interpolation=cv2.INTER_NEAREST  # Critical for mask value preservation
         ),
         
         # Pixel-level Transforms - Less variety for dogs
@@ -310,17 +328,18 @@ def get_class_from_mask(mask: np.ndarray) -> int:
         1 for cat, 2 for dog, 0 if neither could be determined
     """
     # Check for presence of class 1 (cat) or class 2 (dog)
-    if 1 in mask:
+    unique_values = np.unique(mask)
+    if 1 in unique_values or 128 in unique_values:  # Cat classes
         return 1  # Cat
-    elif 2 in mask:
+    elif 2 in unique_values:  # Dog class
         return 2  # Dog
     else:
         return 0  # Unknown
 
-
 def resize_mask_to_match_image(
     mask: np.ndarray, 
-    target_shape: Tuple[int, int]
+    target_shape: Tuple[int, int],
+    logger: Optional[logging.Logger] = None
 ) -> np.ndarray:
     """
     Resize a mask to match the shape of the corresponding image
@@ -329,22 +348,35 @@ def resize_mask_to_match_image(
     Args:
         mask: Original mask as numpy array
         target_shape: Target shape (height, width)
+        logger: Optional logger for debugging
         
     Returns:
         Resized mask as numpy array
     """
+    # Ensure mask is uint8
+    mask = mask.astype(np.uint8)
+    
+    if logger:
+        logger.debug(f"Resizing mask from {mask.shape} to {target_shape}")
+        logger.debug(f"Original mask values: {np.unique(mask)}")
+    
     # Resize mask using nearest neighbor interpolation to preserve label values
     resized_mask = cv2.resize(
         mask, (target_shape[1], target_shape[0]),
         interpolation=cv2.INTER_NEAREST
     )
     
+    if logger:
+        logger.debug(f"Resized mask values: {np.unique(resized_mask)}")
+    
     return resized_mask
 
 
 def load_image_and_mask(
     img_path: Path,
-    mask_path: Path
+    mask_path: Path,
+    logger: Optional[logging.Logger] = None,
+    debug_mask: bool = False
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Load an image and its corresponding mask.
@@ -353,6 +385,8 @@ def load_image_and_mask(
     Args:
         img_path: Path to the image file
         mask_path: Path to the mask file
+        logger: Optional logger for debugging
+        debug_mask: Whether to print debug information for mask values
         
     Returns:
         Tuple of (image, mask) as numpy arrays with same dimensions
@@ -368,15 +402,18 @@ def load_image_and_mask(
     # Convert to RGB for consistency with most models
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     
-    # Read mask with PIL to preserve label values
-    try:
-        mask = np.array(Image.open(mask_path))
-    except Exception as e:
-        raise ValueError(f"Failed to read mask: {mask_path}, error: {e}")
+    # Read mask with OpenCV to preserve label values
+    # This is more reliable than PIL for specific values
+    mask = cv2.imread(str(mask_path), cv2.IMREAD_UNCHANGED)
+    if mask is None:
+        raise ValueError(f"Failed to read mask: {mask_path}")
+    
+    if debug_mask and logger:
+        logger.info(f"Loaded mask from {mask_path}, shape: {mask.shape}, values: {np.unique(mask)}")
     
     # Resize mask to match image dimensions if needed
     if image.shape[:2] != mask.shape[:2]:
-        mask = resize_mask_to_match_image(mask, image.shape[:2])
+        mask = resize_mask_to_match_image(mask, image.shape[:2], logger)
     
     return image, mask
 
@@ -385,7 +422,9 @@ def save_augmented_data(
     image: np.ndarray,
     mask: np.ndarray,
     output_img_path: Path,
-    output_mask_path: Path
+    output_mask_path: Path,
+    logger: Optional[logging.Logger] = None,
+    debug_mask: bool = False
 ) -> None:
     """
     Save the augmented image and mask.
@@ -395,10 +434,18 @@ def save_augmented_data(
         mask: Augmented mask as numpy array
         output_img_path: Path to save the augmented image
         output_mask_path: Path to save the augmented mask
+        logger: Optional logger for debugging
+        debug_mask: Whether to print debug information for mask values
     """
     # Create output directories if they don't exist
     output_img_path.parent.mkdir(parents=True, exist_ok=True)
     output_mask_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Ensure mask is uint8
+    mask = mask.astype(np.uint8)
+    
+    if debug_mask and logger:
+        logger.info(f"Saving mask to {output_mask_path}, values before save: {np.unique(mask)}")
     
     # Convert image from RGB to BGR for OpenCV
     image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
@@ -406,8 +453,17 @@ def save_augmented_data(
     # Save image with OpenCV
     cv2.imwrite(str(output_img_path), image_bgr)
     
-    # Save mask with PIL to preserve label values
-    Image.fromarray(mask).save(output_mask_path)
+    # Save mask with OpenCV (most reliable for preserving values)
+    cv2.imwrite(str(output_mask_path), mask)
+    
+    # Verify the saved mask values if in debug mode
+    if debug_mask and logger:
+        try:
+            # Reload the mask and check values
+            saved_mask = cv2.imread(str(output_mask_path), cv2.IMREAD_UNCHANGED)
+            logger.info(f"Mask values after save/reload: {np.unique(saved_mask)}")
+        except Exception as e:
+            logger.error(f"Error verifying saved mask: {e}")
 
 
 def visualize_augmentation(
@@ -416,7 +472,8 @@ def visualize_augmentation(
     augmented_image: np.ndarray,
     augmented_mask: np.ndarray,
     output_path: Path,
-    index: int
+    index: int,
+    logger: Optional[logging.Logger] = None
 ) -> None:
     """
     Visualize original and augmented image-mask pairs.
@@ -428,9 +485,13 @@ def visualize_augmentation(
         augmented_mask: Augmented mask as numpy array
         output_path: Directory to save visualization
         index: Index for the output filename
+        logger: Optional logger for debugging
     """
     # Create visualization directory
     output_path.mkdir(parents=True, exist_ok=True)
+    
+    if logger:
+        logger.info(f"Creating visualization {index}, original mask values: {np.unique(original_mask)}, augmented mask values: {np.unique(augmented_mask)}")
     
     # Create a visualization with 2x2 grid:
     # [original image, augmented image]
@@ -452,8 +513,9 @@ def visualize_augmentation(
             # Create a color map for visualization
             colored_mask = np.zeros((new_h, new_w, 3), dtype=np.uint8)
             # Background (class 0) - Black
-            # Cat (class 1) - Red
+            # Cat (class 1 or 128) - Red
             colored_mask[resized == 1] = [255, 0, 0]
+            colored_mask[resized == 128] = [255, 0, 0]  # Handle OpenCV loaded value
             # Dog (class 2) - Green
             colored_mask[resized == 2] = [0, 255, 0]
             # Border/Don't care (class 255) - White
@@ -509,6 +571,9 @@ def visualize_augmentation(
     
     # Save the visualization
     cv2.imwrite(str(output_path / f"augmentation_example_{index}.jpg"), fig)
+    
+    if logger:
+        logger.info(f"Saved visualization to {output_path / f'augmentation_example_{index}.jpg'}")
 
 
 def augment_dataset(args: argparse.Namespace, logger: logging.Logger) -> None:
@@ -579,7 +644,9 @@ def augment_dataset(args: argparse.Namespace, logger: logging.Logger) -> None:
             
             # Load image and mask, resizing mask to match image dimensions
             try:
-                image, mask = load_image_and_mask(img_path, mask_path)
+                image, mask = load_image_and_mask(
+                    img_path, mask_path, logger, args.debug_mask
+                )
             except ValueError as e:
                 logger.error(f"Error loading {img_path.name}: {e}")
                 continue
@@ -591,20 +658,30 @@ def augment_dataset(args: argparse.Namespace, logger: logging.Logger) -> None:
                 cat_count += 1
                 transform = cat_transform
                 num_augmentations = args.cat_augmentations
+                if args.debug_mask:
+                    logger.info(f"Processing cat image: {img_path.name}")
             elif class_id == 2:  # Dog
                 dog_count += 1
                 transform = dog_transform
                 num_augmentations = args.dog_augmentations
+                if args.debug_mask:
+                    logger.info(f"Processing dog image: {img_path.name}")
             else:
-                logger.warning(f"Image {img_path.name} has unknown class, skipping")
+                logger.warning(f"Image {img_path.name} has unknown class (values: {np.unique(mask)}), skipping")
                 continue
             
             # Generate augmentations
             for aug_idx in range(num_augmentations):
+                # Ensure mask is uint8 before augmentation
+                mask_uint8 = mask.astype(np.uint8)
+                
                 # Apply augmentation
-                augmented = transform(image=image, mask=mask)
+                augmented = transform(image=image, mask=mask_uint8)
                 augmented_image = augmented['image']
                 augmented_mask = augmented['mask']
+                
+                if args.debug_mask:
+                    logger.info(f"Augmentation {aug_idx+1} for {img_path.name}, mask values: {np.unique(augmented_mask)}")
                 
                 # Generate output paths
                 output_img_name = f"{img_path.stem}_aug{aug_idx+1}.jpg"
@@ -616,7 +693,8 @@ def augment_dataset(args: argparse.Namespace, logger: logging.Logger) -> None:
                 # Save augmented data
                 save_augmented_data(
                     augmented_image, augmented_mask,
-                    output_img_path, output_mask_path
+                    output_img_path, output_mask_path,
+                    logger, args.debug_mask
                 )
                 
                 # Update counters
@@ -629,12 +707,14 @@ def augment_dataset(args: argparse.Namespace, logger: logging.Logger) -> None:
                 if args.visualize > 0 and visualization_count < args.visualize:
                     visualize_augmentation(
                         image, mask, augmented_image, augmented_mask,
-                        vis_dir, visualization_count + 1
+                        vis_dir, visualization_count + 1, logger
                     )
                     visualization_count += 1
         
         except Exception as e:
             logger.error(f"Error processing image {img_path.name}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     # Log final statistics
     logger.info("Augmentation complete!")
