@@ -100,14 +100,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--cat-augmentations",
         type=int,
-        default=3,
+        default=5,
         help="Number of augmentations to generate per cat image"
     )
     
     parser.add_argument(
         "--dog-augmentations",
         type=int,
-        default=1,
+        default=2,
         help="Number of augmentations to generate per dog image"
     )
     
@@ -187,11 +187,11 @@ def create_augmentation_pipelines(config: Dict[str, Any]) -> Tuple[A.Compose, A.
             shift_limit=config['cat']['shift_limit'],
             p=config['cat']['shift_scale_rotate_prob'],
             border_mode=cv2.BORDER_CONSTANT,
-            value=0,
-            mask_value=0,
             interpolation=cv2.INTER_LINEAR,
             mask_interpolation=cv2.INTER_NEAREST  # Critical for mask value preservation
         ),
+        
+        # NOTE: RandomResizedCrop removed as it causes mask misalignment issues
         
         # Elastic Transforms - Only for cats
         A.OneOf([
@@ -219,6 +219,18 @@ def create_augmentation_pipelines(config: Dict[str, Any]) -> Tuple[A.Compose, A.
             )
         ], p=config['cat']['elastic_transform_prob']),
         
+        # Additional Spatial Transform - Perspective
+        A.Perspective(
+            scale=tuple(config['cat']['perspective']['scale']),
+            keep_size=True,
+            pad_mode=cv2.BORDER_CONSTANT,
+            mask_pad_val=0,
+            fit_output=False,
+            interpolation=cv2.INTER_LINEAR,
+            mask_interpolation=cv2.INTER_NEAREST,  # Critical for mask value preservation
+            p=config['cat']['perspective']['prob']
+        ),
+        
         # Pixel-level Transforms - More variety for cats
         A.OneOf([
             A.RandomBrightnessContrast(
@@ -240,6 +252,23 @@ def create_augmentation_pipelines(config: Dict[str, Any]) -> Tuple[A.Compose, A.
             )
         ], p=config['cat']['color_transform_prob']),
         
+        # Additional Color Transformations
+        A.OneOf([
+            A.CLAHE(
+                clip_limit=config['cat']['clahe_equalize']['clahe_clip_limit'], 
+                tile_grid_size=tuple(config['cat']['clahe_equalize']['clahe_tile_grid_size']), 
+                p=config['cat']['clahe_equalize']['clahe_prob']
+            ),
+            A.Equalize(
+                mode='cv', 
+                by_channels=True, 
+                p=config['cat']['clahe_equalize']['equalize_prob']
+            ),
+            A.ToGray(
+                p=config['cat']['clahe_equalize']['to_gray_prob']
+            )
+        ], p=config['cat']['clahe_equalize']['prob']),
+        
         # Noise and blur - More for cats
         A.OneOf([
             A.GaussNoise(
@@ -256,6 +285,21 @@ def create_augmentation_pipelines(config: Dict[str, Any]) -> Tuple[A.Compose, A.
             ),
         ], p=config['cat']['noise_transform_prob']),
         
+        # Salt and Pepper Noise
+        A.SaltAndPepper(
+            always_apply=False,
+            p=config['cat']['salt_pepper']['prob'],
+            salt_p=config['cat']['salt_pepper']['salt_p'],
+            pepper_p=config['cat']['salt_pepper']['pepper_p']
+        ),
+        
+        # ISO Noise (camera sensor noise)
+        A.ISONoise(
+            color_shift=tuple(config['cat']['iso_noise']['color_shift']),
+            intensity=tuple(config['cat']['iso_noise']['intensity']),
+            p=config['cat']['iso_noise']['prob']
+        ),
+        
         # Lighting variations
         A.OneOf([
             A.RandomShadow(
@@ -268,12 +312,19 @@ def create_augmentation_pipelines(config: Dict[str, Any]) -> Tuple[A.Compose, A.
                 angle_upper=1,
                 p=config['cat']['sunflare']['prob']
             ),
+            # Random Fog for cats
+            A.RandomFog(
+                fog_coef_lower=config['cat']['fog']['fog_coef_lower'], 
+                fog_coef_upper=config['cat']['fog']['fog_coef_upper'], 
+                alpha_coef=config['cat']['fog']['alpha_coef'], 
+                p=config['cat']['fog']['prob']
+            ),
         ], p=config['cat']['lighting_transform_prob']),
     ])
     
-    # Create dog augmentation pipeline (more conservative)
+    # Create dog augmentation pipeline
     dog_transform = A.Compose([
-        # Spatial Transforms - More conservative for dogs
+        # Spatial Transforms for dogs
         A.HorizontalFlip(p=config['dog']['horizontal_flip_prob']),
         A.ShiftScaleRotate(
             scale_limit=config['dog']['scale_limit'],
@@ -281,13 +332,44 @@ def create_augmentation_pipelines(config: Dict[str, Any]) -> Tuple[A.Compose, A.
             shift_limit=config['dog']['shift_limit'],
             p=config['dog']['shift_scale_rotate_prob'],
             border_mode=cv2.BORDER_CONSTANT,
-            value=0,
-            mask_value=0,
             interpolation=cv2.INTER_LINEAR,
             mask_interpolation=cv2.INTER_NEAREST  # Critical for mask value preservation
         ),
         
-        # Pixel-level Transforms - Less variety for dogs
+        # NOTE: RandomResizedCrop removed as it causes mask misalignment issues
+        
+        # Elastic transforms for dogs
+        A.OneOf([
+            A.ElasticTransform(
+                alpha=config['dog']['elastic']['alpha'],
+                sigma=config['dog']['elastic']['sigma'],
+                alpha_affine=config['dog']['elastic']['alpha_affine'],
+                p=config['dog']['elastic']['prob'],
+                interpolation=cv2.INTER_LINEAR,
+                mask_interpolation=cv2.INTER_NEAREST
+            ),
+            A.GridDistortion(
+                num_steps=config['dog']['grid_distortion']['num_steps'],
+                distort_limit=config['dog']['grid_distortion']['distort_limit'],
+                p=config['dog']['grid_distortion']['prob'],
+                interpolation=cv2.INTER_LINEAR,
+                mask_interpolation=cv2.INTER_NEAREST
+            ),
+        ], p=config['dog']['elastic_transform_prob']),
+        
+        # Perspective for dogs
+        A.Perspective(
+            scale=tuple(config['dog']['perspective']['scale']),
+            keep_size=True,
+            pad_mode=cv2.BORDER_CONSTANT,
+            mask_pad_val=0,
+            fit_output=False,
+            interpolation=cv2.INTER_LINEAR,
+            mask_interpolation=cv2.INTER_NEAREST,
+            p=config['dog']['perspective']['prob']
+        ),
+        
+        # Pixel-level Transforms for dogs
         A.OneOf([
             A.RandomBrightnessContrast(
                 brightness_limit=config['dog']['brightness_contrast']['brightness_limit'],
@@ -300,9 +382,32 @@ def create_augmentation_pipelines(config: Dict[str, Any]) -> Tuple[A.Compose, A.
                 val_shift_limit=config['dog']['hsv']['val_shift_limit'],
                 p=config['dog']['hsv']['prob']
             ),
+            A.RGBShift(
+                r_shift_limit=config['dog']['rgb_shift']['r_shift_limit'],
+                g_shift_limit=config['dog']['rgb_shift']['g_shift_limit'],
+                b_shift_limit=config['dog']['rgb_shift']['b_shift_limit'],
+                p=config['dog']['rgb_shift']['prob']
+            ),
         ], p=config['dog']['color_transform_prob']),
         
-        # Minimal noise/blur for dogs
+        # Additional Color Transformations for dogs
+        A.OneOf([
+            A.CLAHE(
+                clip_limit=config['dog']['clahe_equalize']['clahe_clip_limit'], 
+                tile_grid_size=tuple(config['dog']['clahe_equalize']['clahe_tile_grid_size']), 
+                p=config['dog']['clahe_equalize']['clahe_prob']
+            ),
+            A.Equalize(
+                mode='cv', 
+                by_channels=True, 
+                p=config['dog']['clahe_equalize']['equalize_prob']
+            ),
+            A.ToGray(
+                p=config['dog']['clahe_equalize']['to_gray_prob']
+            )
+        ], p=config['dog']['clahe_equalize']['prob']),
+        
+        # Noise/blur for dogs
         A.OneOf([
             A.GaussNoise(
                 var_limit=config['dog']['gauss_noise']['var_limit'],
@@ -312,15 +417,54 @@ def create_augmentation_pipelines(config: Dict[str, Any]) -> Tuple[A.Compose, A.
                 blur_limit=config['dog']['gaussian_blur']['blur_limit'],
                 p=config['dog']['gaussian_blur']['prob']
             ),
+            A.MotionBlur(
+                blur_limit=config['dog']['motion_blur']['blur_limit'],
+                p=config['dog']['motion_blur']['prob']
+            ),
         ], p=config['dog']['noise_transform_prob']),
+        
+        # Salt and Pepper Noise
+        A.SaltAndPepper(
+            always_apply=False,
+            p=config['dog']['salt_pepper']['prob'],
+            salt_p=config['dog']['salt_pepper']['salt_p'],
+            pepper_p=config['dog']['salt_pepper']['pepper_p']
+        ),
+        
+        # ISO Noise (camera sensor noise)
+        A.ISONoise(
+            color_shift=tuple(config['dog']['iso_noise']['color_shift']),
+            intensity=tuple(config['dog']['iso_noise']['intensity']),
+            p=config['dog']['iso_noise']['prob']
+        ),
+        
+        # Lighting variations for dogs
+        A.OneOf([
+            A.RandomShadow(
+                shadow_roi=(0, 0, 1, 1),
+                p=config['dog']['shadow']['prob']
+            ),
+            A.RandomSunFlare(
+                flare_roi=(0, 0, 1, 1),
+                angle_lower=0,
+                angle_upper=1,
+                p=config['dog']['sunflare']['prob']
+            ),
+            # Random Fog for dogs
+            A.RandomFog(
+                fog_coef_lower=config['dog']['fog']['fog_coef_lower'], 
+                fog_coef_upper=config['dog']['fog']['fog_coef_upper'], 
+                alpha_coef=config['dog']['fog']['alpha_coef'], 
+                p=config['dog']['fog']['prob']
+            ),
+        ], p=config['dog']['lighting_transform_prob']),
     ])
     
     return cat_transform, dog_transform
 
-
 def get_class_from_mask(mask: np.ndarray, filename: str = None) -> int:
     """
-    Determine if a mask contains a cat (1) or dog (2) based on filename.
+    Determine if a mask contains a cat (1) or dog (2) based on mask values and filename.
     
     Args:
         mask: Numpy array containing mask data
@@ -329,43 +473,47 @@ def get_class_from_mask(mask: np.ndarray, filename: str = None) -> int:
     Returns:
         1 for cat, 2 for dog, 0 if neither could be determined
     """
-    # Complete list of cat breeds
-    cat_breeds = [
-        'abyssinian', 'bengal', 'birman', 'bombay', 
-        'british_shorthair', 'egyptian_mau', 'maine_coon', 
-        'persian', 'ragdoll', 'russian_blue', 'siamese', 'sphynx'
-    ]
-    
-    # Complete list of dog breeds
-    dog_breeds = [
-        'american_bulldog', 'american_pit_bull_terrier', 
-        'basset_hound', 'beagle', 'boxer', 'chihuahua', 
-        'english_cocker_spaniel', 'english_setter', 
-        'german_shorthaired', 'great_pyrenees', 'havanese', 
-        'japanese_chin', 'keeshond', 'leonberger', 
-        'miniature_pinscher', 'newfoundland', 'pomeranian', 
-        'pug', 'saint_bernard', 'samoyed', 'scottish_terrier', 
-        'shiba_inu', 'staffordshire_bull_terrier', 
-        'wheaten_terrier', 'yorkshire_terrier'
-    ]
-    
-    if filename:
-        filename_lower = filename.lower()
-        # Check if filename contains a known cat breed
-        if any(breed.lower() in filename_lower for breed in cat_breeds):
-            return 1  # Cat
-        # Check if filename contains a known dog breed
-        elif any(breed.lower() in filename_lower for breed in dog_breeds):
-            return 2  # Dog
-    
-    # If no breed detected from filename, check mask values as fallback
+    # First priority: Check mask values directly (most reliable)
     unique_values = np.unique(mask)
+    
     if 1 in unique_values:
         return 1  # Cat
     elif 2 in unique_values:
         return 2  # Dog
-    else:
-        return 0  # Unknown
+    
+    # If mask check is inconclusive, check filename
+    if filename:
+        # Complete list of cat breeds - using shortened forms to improve matching
+        cat_breeds = [
+            'abyssinian', 'bengal', 'birman', 'bombay', 
+            'british', 'egyptian', 'maine', 
+            'persian', 'ragdoll', 'russian', 'siamese', 'sphynx'
+        ]
+        
+        # Complete list of dog breeds - using shortened forms to improve matching
+        dog_breeds = [
+            'american_bulldog', 'american_pit', 'pit_bull', 
+            'basset', 'beagle', 'boxer', 'chihuahua', 
+            'cocker_spaniel', 'english_setter', 
+            'german_shorthaired', 'great_pyrenees', 'havanese', 
+            'japanese_chin', 'keeshond', 'leonberger', 
+            'miniature_pinscher', 'newfoundland', 'pomeranian', 
+            'pug', 'saint_bernard', 'samoyed', 'scottish', 
+            'shiba', 'staffordshire', 
+            'wheaten', 'yorkshire'
+        ]
+        
+        filename_lower = filename.lower()
+        
+        # Check if filename contains a known cat breed
+        if any(breed in filename_lower for breed in cat_breeds):
+            return 1  # Cat
+        # Check if filename contains a known dog breed
+        elif any(breed in filename_lower for breed in dog_breeds):
+            return 2  # Dog
+    
+    # If we get here, we couldn't determine the class
+    return 0  # Unknown
 
 def resize_mask_to_match_image(
     mask: np.ndarray, 
@@ -648,16 +796,24 @@ def augment_dataset(args: argparse.Namespace, logger: logging.Logger) -> None:
     # Create augmentation pipelines
     cat_transform, dog_transform = create_augmentation_pipelines(config)
     logger.info("Created augmentation pipelines for cats and dogs")
+    logger.info(f"Cat augmentations per image: {args.cat_augmentations}")
+    logger.info(f"Dog augmentations per image: {args.dog_augmentations}")
     
     # Get train images and masks paths
     resized_img_dir = train_dir / "resized"
-    orig_img_dir = train_dir / "color"
-    mask_dir = train_dir / "label"
+    resized_mask_dir = train_dir / "resized_label"  # Use resized masks instead of original
+    
+    # Check if resized_mask_dir exists
+    if not resized_mask_dir.exists():
+        logger.error(f"Resized mask directory not found: {resized_mask_dir}")
+        logger.error("Please run preprocess_training_masks.py first to create resized masks")
+        return
     
     train_images = list(resized_img_dir.glob("*.jpg"))
-    mask_dict = {mask_path.stem: mask_path for mask_path in mask_dir.glob("*.png")}
+    mask_dict = {mask_path.stem: mask_path for mask_path in resized_mask_dir.glob("*.png")}
     
     logger.info(f"Found {len(train_images)} training images")
+    logger.info(f"Found {len(mask_dict)} resized masks")
     
     # Counters for statistics
     cat_count = 0
@@ -665,18 +821,18 @@ def augment_dataset(args: argparse.Namespace, logger: logging.Logger) -> None:
     augmented_cat_count = 0
     augmented_dog_count = 0
     visualization_count = 0
+    unknown_class_count = 0
     
     # Process each image
     for img_idx, img_path in enumerate(tqdm(train_images, desc="Augmenting images")):
         try:
             # Get corresponding mask
             mask_path = mask_dict.get(img_path.stem)
-            # Determine class (cat or dog)
             if not mask_path:
-                logger.warning(f"No mask found for image: {img_path.name}, skipping")
+                logger.warning(f"No resized mask found for image: {img_path.name}, skipping")
                 continue
             
-            # Load image and mask, resizing mask to match image dimensions
+            # Load image and mask
             try:
                 image, mask = load_image_and_mask(
                     img_path, mask_path, logger, args.debug_mask
@@ -686,38 +842,39 @@ def augment_dataset(args: argparse.Namespace, logger: logging.Logger) -> None:
                 continue
             
             # Determine class (cat or dog)
-            # class_id = get_class_from_mask(mask)
             class_id = get_class_from_mask(mask, img_path.name)
-
             
+            # IMPORTANT: Set the correct number of augmentations based on class
             if class_id == 1:  # Cat
                 cat_count += 1
                 transform = cat_transform
-                num_augmentations = args.cat_augmentations
-                if args.debug_mask:
-                    logger.info(f"Processing cat image: {img_path.name}")
+                num_augmentations = int(args.cat_augmentations)
+                logger.info(f"Cat image: {img_path.name}, will generate {num_augmentations} augmentations")
             elif class_id == 2:  # Dog
                 dog_count += 1
                 transform = dog_transform
-                num_augmentations = args.dog_augmentations
-                if args.debug_mask:
-                    logger.info(f"Processing dog image: {img_path.name}")
+                num_augmentations = int(args.dog_augmentations)
+                logger.info(f"Dog image: {img_path.name}, will generate {num_augmentations} augmentations")
             else:
+                unknown_class_count += 1
                 logger.warning(f"Image {img_path.name} has unknown class (values: {np.unique(mask)}), skipping")
                 continue
             
             # Generate augmentations
-            for aug_idx in range(num_augmentations):
+            augmentation_range = range(num_augmentations)
+            logger.debug(f"Creating {len(augmentation_range)} augmentations for {img_path.name}")
+            
+            for aug_idx in augmentation_range:
                 # Ensure mask is uint8 before augmentation
                 mask_uint8 = mask.astype(np.uint8)
                 
-                # Apply augmentation
+                # Apply augmentation with explicit seed to ensure different results
+                augmentation_seed = args.seed + img_idx + aug_idx
+                A.ReplayCompose.seed = augmentation_seed
+                
                 augmented = transform(image=image, mask=mask_uint8)
                 augmented_image = augmented['image']
                 augmented_mask = augmented['mask']
-                
-                if args.debug_mask:
-                    logger.info(f"Augmentation {aug_idx+1} for {img_path.name}, mask values: {np.unique(augmented_mask)}")
                 
                 # Generate output paths
                 output_img_name = f"{img_path.stem}_aug{aug_idx+1}.jpg"
@@ -736,7 +893,7 @@ def augment_dataset(args: argparse.Namespace, logger: logging.Logger) -> None:
                 # Update counters
                 if class_id == 1:
                     augmented_cat_count += 1
-                else:
+                elif class_id == 2:
                     augmented_dog_count += 1
                 
                 # Visualize if requested
@@ -752,10 +909,15 @@ def augment_dataset(args: argparse.Namespace, logger: logging.Logger) -> None:
             import traceback
             logger.error(traceback.format_exc())
     
-    # Log final statistics
+    # Log final statistics with sanity checks
+    cat_aug_ratio = augmented_cat_count / cat_count if cat_count > 0 else 0
+    dog_aug_ratio = augmented_dog_count / dog_count if dog_count > 0 else 0
+    
     logger.info("Augmentation complete!")
     logger.info(f"Original dataset: {cat_count} cats, {dog_count} dogs (total: {cat_count + dog_count})")
+    logger.info(f"Unknown class count: {unknown_class_count}")
     logger.info(f"Augmented dataset: {augmented_cat_count} cat augmentations, {augmented_dog_count} dog augmentations")
+    logger.info(f"Augmentation ratios - Cats: {cat_aug_ratio:.2f}x, Dogs: {dog_aug_ratio:.2f}x")
     logger.info(f"Total for training: {cat_count + dog_count + augmented_cat_count + augmented_dog_count} images")
     logger.info(f"Final class distribution: {cat_count + augmented_cat_count} cats, {dog_count + augmented_dog_count} dogs")
     
@@ -765,11 +927,12 @@ def augment_dataset(args: argparse.Namespace, logger: logging.Logger) -> None:
         f.write("Augmentation Report\n")
         f.write("===================\n\n")
         f.write(f"Original dataset: {cat_count} cats, {dog_count} dogs (total: {cat_count + dog_count})\n")
+        f.write(f"Unknown class count: {unknown_class_count}\n")
         f.write(f"Augmented dataset: {augmented_cat_count} cat augmentations, {augmented_dog_count} dog augmentations\n")
+        f.write(f"Augmentation ratios - Cats: {cat_aug_ratio:.2f}x, Dogs: {dog_aug_ratio:.2f}x\n")
         f.write(f"Total for training: {cat_count + dog_count + augmented_cat_count + augmented_dog_count} images\n")
         f.write(f"Final class distribution: {cat_count + augmented_cat_count} cats, {dog_count + augmented_dog_count} dogs\n")
         f.write(f"\nAugmentation parameters are stored in: {args.config}\n")
-
 
 def main() -> None:
     """Main function to augment the dataset."""

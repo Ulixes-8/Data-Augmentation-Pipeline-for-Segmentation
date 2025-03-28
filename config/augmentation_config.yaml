@@ -1,5 +1,4 @@
 # Oxford-IIIT Pet Dataset Augmentation Configuration
-
 # Cat augmentation parameters (more aggressive)
 cat:
   # Spatial transforms
@@ -60,6 +59,40 @@ cat:
     prob: 0.3
   sunflare:
     prob: 0.2
+    
+  # Adding parameters for transforms that were in code but not in config
+  # Salt and Pepper noise
+  salt_pepper:
+    prob: 0.3
+    salt_p: 0.2
+    pepper_p: 0.2
+  
+  # ISO noise
+  iso_noise:
+    prob: 0.3
+    color_shift: [0.01, 0.05]
+    intensity: [0.1, 0.5]
+  
+  # Random fog
+  fog:
+    prob: 0.2
+    fog_coef_lower: 0.1
+    fog_coef_upper: 0.3
+    alpha_coef: 0.08
+  
+  # CLAHE and equalization
+  clahe_equalize:
+    prob: 0.3
+    clahe_clip_limit: 4.0
+    clahe_tile_grid_size: [8, 8]
+    clahe_prob: 0.5
+    equalize_prob: 0.5
+    to_gray_prob: 0.2
+    
+  # Perspective transform
+  perspective:
+    prob: 0.3
+    scale: [0.05, 0.1]
 
 # Dog augmentation parameters (more conservative)
 dog:
@@ -69,6 +102,18 @@ dog:
   rotate_limit: 10
   shift_limit: 0.05
   shift_scale_rotate_prob: 0.5
+  
+  # Elastic transforms (adding what was in code)
+  elastic_transform_prob: 0.2
+  elastic:
+    alpha: 30.0
+    sigma: 3.0
+    alpha_affine: 10.0
+    prob: 0.4
+  grid_distortion:
+    num_steps: 4
+    distort_limit: 0.15
+    prob: 0.4
   
   # Pixel-level transforms
   color_transform_prob: 0.6
@@ -81,6 +126,11 @@ dog:
     sat_shift_limit: 20
     val_shift_limit: 15
     prob: 0.4
+  rgb_shift:
+    r_shift_limit: 10
+    g_shift_limit: 10
+    b_shift_limit: 10
+    prob: 0.3
   
   # Noise and blur
   noise_transform_prob: 0.3
@@ -90,3 +140,47 @@ dog:
   gaussian_blur:
     blur_limit: 3
     prob: 0.3
+  motion_blur:
+    blur_limit: 3
+    prob: 0.3
+    
+  # Adding parameters for transforms that were in code but not in config
+  # Salt and Pepper noise
+  salt_pepper:
+    prob: 0.2
+    salt_p: 0.15
+    pepper_p: 0.15
+  
+  # ISO noise
+  iso_noise:
+    prob: 0.2
+    color_shift: [0.01, 0.03]
+    intensity: [0.1, 0.3]
+  
+  # Random fog
+  fog:
+    prob: 0.15
+    fog_coef_lower: 0.08
+    fog_coef_upper: 0.2
+    alpha_coef: 0.08
+  
+  # CLAHE and equalization
+  clahe_equalize:
+    prob: 0.2
+    clahe_clip_limit: 3.0
+    clahe_tile_grid_size: [8, 8]
+    clahe_prob: 0.4
+    equalize_prob: 0.4
+    to_gray_prob: 0.15
+  
+  # Lighting variations
+  lighting_transform_prob: 0.2
+  shadow:
+    prob: 0.2
+  sunflare:
+    prob: 0.1
+    
+  # Perspective transform
+  perspective:
+    prob: 0.2
+    scale: [0.03, 0.07]
