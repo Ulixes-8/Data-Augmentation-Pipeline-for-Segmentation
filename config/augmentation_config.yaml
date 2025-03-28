@@ -8,6 +8,23 @@ cat:
   shift_limit: 0.1
   shift_scale_rotate_prob: 0.8
   
+  # RandomResizedCrop parameters
+  random_resized_crop:
+    size: (512, 512)  # Single size parameter for both dimensions
+    scale: [0.8, 1.0]
+    ratio: [0.9, 1.1]
+    prob: 0.3
+  
+  # CoarseDropout for occlusion tests (black squares of size 0-45px)
+  coarse_dropout:
+    max_holes: 1
+    min_height: 0
+    max_height: 45
+    min_width: 0
+    max_width: 45
+    fill_value: 0
+    prob: 0.4
+  
   # Elastic transforms
   elastic_transform_prob: 0.3
   elastic:
@@ -27,8 +44,11 @@ cat:
   # Pixel-level transforms
   color_transform_prob: 0.8
   brightness_contrast:
-    brightness_limit: 0.2
-    contrast_limit: 0.2
+    # Range matches ±0-45 pixel values (45/255 ≈ 0.176)
+    brightness_limit: 0.176
+    # Combined range for contrast increase (1.0-1.25) and decrease (0.1-1.0)
+    # In Albumentations, this is represented as [-0.9, 0.25]
+    contrast_limit: [-0.9, 0.25]
     prob: 0.8
   hsv:
     hue_shift_limit: 10
@@ -44,10 +64,10 @@ cat:
   # Noise and blur
   noise_transform_prob: 0.4
   gauss_noise:
-    var_limit: [10.0, 30.0]
+    var_limit: [0.0, 18.0]
     prob: 0.5
   gaussian_blur:
-    blur_limit: 3
+    blur_limit: [0, 9]
     prob: 0.4
   motion_blur:
     blur_limit: 3
@@ -60,12 +80,11 @@ cat:
   sunflare:
     prob: 0.2
     
-  # Adding parameters for transforms that were in code but not in config
   # Salt and Pepper noise
   salt_pepper:
     prob: 0.3
-    salt_p: 0.2
-    pepper_p: 0.2
+    salt_p: [0.0, 0.18]
+    pepper_p: [0.0, 0.18]
   
   # ISO noise
   iso_noise:
@@ -103,7 +122,24 @@ dog:
   shift_limit: 0.05
   shift_scale_rotate_prob: 0.5
   
-  # Elastic transforms (adding what was in code)
+  # RandomResizedCrop parameters (more conservative)
+  random_resized_crop:
+    size: (512, 512) # Single size parameter for both dimensions
+    scale: [0.9, 1.0]
+    ratio: [0.95, 1.05]
+    prob: 0.2
+  
+  # CoarseDropout for occlusion tests (black squares of size 0-45px)
+  coarse_dropout:
+    max_holes: 1
+    min_height: 0
+    max_height: 45
+    min_width: 0
+    max_width: 45
+    fill_value: 0
+    prob: 0.3
+  
+  # Elastic transforms
   elastic_transform_prob: 0.2
   elastic:
     alpha: 30.0
@@ -118,8 +154,11 @@ dog:
   # Pixel-level transforms
   color_transform_prob: 0.6
   brightness_contrast:
-    brightness_limit: 0.15
-    contrast_limit: 0.15
+    # Range matches ±0-45 pixel values (45/255 ≈ 0.176)
+    brightness_limit: 0.176
+    # Combined range for contrast increase (1.0-1.25) and decrease (0.1-1.0)
+    # In Albumentations, this is represented as [-0.9, 0.25]
+    contrast_limit: [-0.9, 0.25]
     prob: 0.7
   hsv:
     hue_shift_limit: 5
@@ -135,21 +174,20 @@ dog:
   # Noise and blur
   noise_transform_prob: 0.3
   gauss_noise:
-    var_limit: [5.0, 20.0]
+    var_limit: [0.0, 18.0]
     prob: 0.3
   gaussian_blur:
-    blur_limit: 3
+    blur_limit: [0, 9]
     prob: 0.3
   motion_blur:
     blur_limit: 3
     prob: 0.3
     
-  # Adding parameters for transforms that were in code but not in config
   # Salt and Pepper noise
   salt_pepper:
     prob: 0.2
-    salt_p: 0.15
-    pepper_p: 0.15
+    salt_p: [0.0, 0.18]
+    pepper_p: [0.0, 0.18]
   
   # ISO noise
   iso_noise:

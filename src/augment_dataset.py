@@ -191,7 +191,28 @@ def create_augmentation_pipelines(config: Dict[str, Any]) -> Tuple[A.Compose, A.
             mask_interpolation=cv2.INTER_NEAREST  # Critical for mask value preservation
         ),
         
-        # NOTE: RandomResizedCrop removed as it causes mask misalignment issues
+        # RandomResizedCrop - previously removed due to potential mask misalignment, now testing again
+        A.RandomResizedCrop(
+            # size=config['cat']['random_resized_crop']['size'],
+            size=(512, 512),
+            scale=tuple(config['cat']['random_resized_crop']['scale']),
+            ratio=tuple(config['cat']['random_resized_crop']['ratio']),
+            interpolation=cv2.INTER_LINEAR,
+            mask_interpolation=cv2.INTER_NEAREST,  # Critical for mask value preservation
+            p=config['cat']['random_resized_crop']['prob']
+        ),
+        
+        # CoarseDropout for occlusion tests (g)
+        A.CoarseDropout(
+            max_holes=config['cat']['coarse_dropout']['max_holes'],
+            max_height=config['cat']['coarse_dropout']['max_height'],
+            max_width=config['cat']['coarse_dropout']['max_width'],
+            min_height=config['cat']['coarse_dropout']['min_height'],
+            min_width=config['cat']['coarse_dropout']['min_width'],
+            fill_value=config['cat']['coarse_dropout']['fill_value'],
+            mask_fill_value=0,  # For masks, keeping background value
+            p=config['cat']['coarse_dropout']['prob']
+        ),
         
         # Elastic Transforms - Only for cats
         A.OneOf([
@@ -336,7 +357,28 @@ def create_augmentation_pipelines(config: Dict[str, Any]) -> Tuple[A.Compose, A.
             mask_interpolation=cv2.INTER_NEAREST  # Critical for mask value preservation
         ),
         
-        # NOTE: RandomResizedCrop removed as it causes mask misalignment issues
+        # RandomResizedCrop - previously removed due to potential mask misalignment, now testing again
+        A.RandomResizedCrop(
+            size=(512, 512),
+            # size=config['dog']['random_resized_crop']['size'],
+            scale=tuple(config['dog']['random_resized_crop']['scale']),
+            ratio=tuple(config['dog']['random_resized_crop']['ratio']),
+            interpolation=cv2.INTER_LINEAR,
+            mask_interpolation=cv2.INTER_NEAREST,  # Critical for mask value preservation
+            p=config['dog']['random_resized_crop']['prob']
+        ),
+        
+        # CoarseDropout for occlusion tests (g)
+        A.CoarseDropout(
+            max_holes=config['dog']['coarse_dropout']['max_holes'],
+            max_height=config['dog']['coarse_dropout']['max_height'],
+            max_width=config['dog']['coarse_dropout']['max_width'],
+            min_height=config['dog']['coarse_dropout']['min_height'],
+            min_width=config['dog']['coarse_dropout']['min_width'],
+            fill_value=config['dog']['coarse_dropout']['fill_value'],
+            mask_fill_value=0,  # For masks, keeping background value
+            p=config['dog']['coarse_dropout']['prob']
+        ),
         
         # Elastic transforms for dogs
         A.OneOf([
@@ -461,7 +503,6 @@ def create_augmentation_pipelines(config: Dict[str, Any]) -> Tuple[A.Compose, A.
     ])
     
     return cat_transform, dog_transform
-
 def get_class_from_mask(mask: np.ndarray, filename: str = None) -> int:
     """
     Determine if a mask contains a cat (1) or dog (2) based on mask values and filename.

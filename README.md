@@ -1,171 +1,186 @@
+# Oxford-IIIT Pet Dataset: Augmentation for Semantic Segmentation
 
-# Revised Augmentation Strategy
+This repository contains scripts for preprocessing and augmenting the Oxford-IIIT Pet Dataset for semantic segmentation tasks. The implementation focuses on class-balanced data augmentation to address the dog-to-cat imbalance in the original dataset.
 
-## 1. Augmentation Philosophy
+## Repository Structure
 
-With our correctly processed dataset and proper understanding of the evaluation requirements, we should focus on:
-
-1. **Preserving Original Domain Information**: All augmentations should maintain the essential characteristics of pets while creating useful variations.
-
-2. **Addressing Class Imbalance**: With a 2:1 dog-to-cat ratio, we need cat-focused augmentation to balance the training data.
-
-3. **Semantic Integrity**: Augmentations must preserve the semantic meaning of mask labels (0: background, 1: cat, 2: dog, 255: border/don't care).
-
-## 2. Augmentation Structure
-
-### Directory Organization
 ```
-data/processed/
-├── Train/
-│   ├── color/      (original images)
-│   ├── label/      (original masks)
-│   ├── resized/    (model-ready images)
-│   └── augmented/  (NEW - will contain augmented data)
-│       ├── images/ (augmented model-ready images)
-│       └── masks/  (corresponding augmented masks)
-├── Val/
-│   ├── color/      (original images)
-│   ├── label/      (original masks)
-│   └── resized/    (model-ready images)
-└── Test/
-    ├── color/      (original images)
-    ├── label/      (original masks)
-    └── resized/    (model-ready images)
+.
+├── config/
+│   └── augmentation_config.yaml    # Configuration for augmentation parameters
+├── data/
+│   └── processed/                  # Processed dataset (details below)
+├── src/
+│   ├── augment_dataset.py          # Class-specific augmentation implementation
+│   ├── dataset_analyzer.py         # Dataset analysis utilities
+│   ├── debug_mask_values.py        # Tool for analyzing mask encoding
+│   ├── download_and_extract.py     # Download dataset from Google Drive
+│   ├── preprocess_dataset.py       # Split dataset and resize images
+│   ├── preprocess_test_val_labels.py # Process val/test masks without resizing
+│   └── preprocess_training_labels.py # Resize training masks to match images
+└── utils/
+    └── helpers.py                  # Utility functions
 ```
 
-### Augmentation Storage Logic
-- Original images/masks remain untouched in their respective directories
-- We'll create new directories for augmented data
-- Naming convention: `{original_filename}_aug{number}.{extension}`
-- This approach maintains clear traceability between original and augmented data
+## Data Directory Structure
 
-## 3. Class-Specific Augmentation Strategy
-
-### Cats (Minority Class)
-- Generate 3 augmented versions of each cat image
-- Apply more aggressive and varied augmentations
-- Goal: Increase representation and variability of cat data
-
-### Dogs (Majority Class)
-- Generate 1 augmented version of each dog image
-- Apply more conservative augmentations
-- Goal: Add some variability without overrepresenting dogs
-
-## 4. Detailed Augmentation Pipelines
-
-### Cat Augmentation Pipeline
-```python
-cat_transform = A.Compose([
-    # Spatial Transforms - More aggressive for cats
-    A.HorizontalFlip(p=0.5),                                # Horizontal flip only (realistic for animals)
-    A.ShiftScaleRotate(scale_limit=0.15,                   # Allow larger scale changes
-                       rotate_limit=15,                     # Small rotations to maintain realism
-                       shift_limit=0.1,                     # Allow slight shifting
-                       p=0.8,                              # Higher probability for cats
-                       border_mode=cv2.BORDER_CONSTANT,    # Black padding
-                       value=0),
-    
-    # Moderate Elastic Transforms - only for cats
-    A.OneOf([
-        A.ElasticTransform(alpha=40, sigma=4, alpha_affine=15, p=0.6),  # Mild elastic deformation
-        A.GridDistortion(num_steps=5, distort_limit=0.2, p=0.5),        # Slight grid distortion
-        A.OpticalDistortion(distort_limit=0.2, shift_limit=0.15, p=0.5) # Mild optical distortion
-    ], p=0.3),
-    
-    # Pixel-level Transforms - More variety for cats
-    A.OneOf([
-        A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.8),
-        A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=30, val_shift_limit=20, p=0.5),
-        A.RGBShift(r_shift_limit=15, g_shift_limit=15, b_shift_limit=15, p=0.5)
-    ], p=0.8),
-    
-    # Additional transformations for more variety
-    A.OneOf([
-        A.GaussNoise(var_limit=(10, 30), p=0.5),
-        A.GaussianBlur(blur_limit=3, p=0.4),
-        A.MotionBlur(blur_limit=3, p=0.4),
-    ], p=0.4),
-    
-    # Lighting variations
-    A.OneOf([
-        A.RandomShadow(shadow_roi=(0, 0, 1, 1), p=0.3),
-        A.RandomSunFlare(flare_roi=(0, 0, 1, 1), angle_lower=0, angle_upper=1, p=0.2),
-    ], p=0.3),
-], bbox_params=None)  # No bounding box params needed for segmentation
+```
+data/
+└── processed/
+    ├── Train/
+    │   ├── augmented/
+    │   │   ├── images/         # Augmented .jpg images (resized)
+    │   │   └── masks/          # Corresponding augmented .png masks (resized)
+    │   ├── color/              # Original training .jpg images
+    │   ├── label/              # Original training .png masks
+    │   ├── resized/            # Resized .jpg images (512x512)
+    │   └── resized_label/      # Resized .png masks (512x512)
+    │
+    ├── Val/
+    │   ├── color/              # Original validation .jpg images
+    │   ├── label/              # Original validation .png masks
+    │   ├── resized/            # Resized .jpg validation images
+    │   └── processed_labels/   # Processed .png masks
+    │
+    └── Test/
+        ├── color/              # Original test .jpg images
+        ├── label/              # Original test .png masks
+        ├── resized/            # Resized .jpg test images
+        └── processed_labels/   # Processed .png test masks
 ```
 
-### Dog Augmentation Pipeline
-```python
-dog_transform = A.Compose([
-    # Spatial Transforms - More conservative for dogs
-    A.HorizontalFlip(p=0.5),                                # Horizontal flip only
-    A.ShiftScaleRotate(scale_limit=0.1,                    # Smaller scale changes
-                       rotate_limit=10,                     # More limited rotation
-                       shift_limit=0.05,                    # Minimal shifting
-                       p=0.5,                              # Lower probability
-                       border_mode=cv2.BORDER_CONSTANT,
-                       value=0),
-    
-    # No elastic transforms for dogs (to maintain more consistent appearance)
-    
-    # Pixel-level Transforms - Less variety for dogs
-    A.OneOf([
-        A.RandomBrightnessContrast(brightness_limit=0.15, contrast_limit=0.15, p=0.7),
-        A.HueSaturationValue(hue_shift_limit=5, sat_shift_limit=20, val_shift_limit=15, p=0.4),
-    ], p=0.6),
-    
-    # Minimal noise/blur for dogs
-    A.OneOf([
-        A.GaussNoise(var_limit=(5, 20), p=0.3),
-        A.GaussianBlur(blur_limit=3, p=0.3),
-    ], p=0.3),
-], bbox_params=None)
+## Augmentation Philosophy
+
+The augmentation strategy is designed to:
+
+1. **Address Class Imbalance**: The original dataset has a 2:1 dog-to-cat ratio. Our approach generates more augmentations for cats to balance the classes.
+2. **Preserve Semantic Integrity**: All augmentations maintain the semantic meaning of mask labels (0: background, 1: cat, 2: dog, 255: border/don't care).
+3. **Maintain Domain Information**: Augmentations preserve essential characteristics of pets while creating useful variations.
+
+## Preprocessing Pipeline
+
+The preprocessing consists of multiple stages:
+
+1. **Dataset Download and Extraction** (`download_and_extract.py`)
+   - Downloads the Oxford-IIIT Pet Dataset from Google Drive
+   - Extracts into the `data/raw/` directory
+
+2. **Dataset Preprocessing** (`preprocess_dataset.py`)
+   - Detects and removes corrupt images
+   - Splits the TrainVal data into separate Train and Validation sets
+   - Standardizes image sizes (512×512 by default) with aspect ratio preservation
+   - Preserves original mask files for accurate evaluation
+
+3. **Mask Processing** (`preprocess_training_labels.py` and `preprocess_test_val_labels.py`)
+   - Processes training masks to match resized images
+   - Handles test and validation masks with proper class values
+
+4. **Data Augmentation** (`augment_dataset.py`)
+   - Applies class-specific augmentation strategies
+   - More aggressive augmentation for cats (minority class)
+   - Conservative augmentation for dogs (majority class)
+   - Generates multiple augmented versions of each image (more for cats, fewer for dogs)
+
+## Augmentation Details
+
+### Cat Augmentation (Minority Class)
+- Generates 5 augmented versions of each cat image by default
+- Applies more aggressive and varied augmentations
+- Includes elastic transforms, perspective changes, and diverse color transformations
+
+### Dog Augmentation (Majority Class)
+- Generates 2 augmented versions of each dog image by default
+- Applies more conservative augmentations
+- Uses less extreme parameter values for transformations
+
+## Class Balancing Results
+
+The augmentation strategy transforms the dataset from:
+- Original: ~948 cats, ~1,991 dogs (2:1 ratio)
+- After augmentation: ~5,688 cats, ~5,973 dogs (balanced)
+
+## Usage
+
+### Prerequisites
+- Python 3.8+
+- Dependencies listed in `requirements.txt`
+
+### Installation
+```bash
+# Clone the repository
+git clone <repository-url>
+cd <repository-dir>
+
+# Create a virtual environment (optional but recommended)
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
 ```
 
-## 5. Implementation Considerations
+### Data Preparation
+```bash
+# Download and extract the dataset
+python src/download_and_extract.py
 
-### Mask Handling
-- **Critical Point**: All spatial augmentations must be applied identically to both images and masks
-- Use `mask_interpolation=cv2.INTER_NEAREST` for mask transformation to preserve exact class values
-- Ensure the 255 (don't care/border) values are preserved exactly in masks
+# Preprocess the dataset
+python src/preprocess_dataset.py --val-ratio 0.2 --size 512
 
-### Validation
-- No augmentation for validation data
-- Validation images are only resized/padded for model input
-- Evaluation happens against original masks after inverse-transforming predictions
+# Process training masks
+python src/preprocess_training_labels.py --size 512
 
-### Quality Assurance
-- Visual inspection of augmented samples before full processing
-- Check class distribution post-augmentation
-- Verify masks maintain proper class values
-- Ensure image-mask correspondence is maintained
+# Process validation and test masks
+python src/preprocess_test_val_labels.py
+```
 
-## 6. Projected Class Balance
+### Data Augmentation
+```bash
+# Run augmentation with default settings (5 augmentations per cat, 2 per dog)
+python src/augment_dataset.py --config config/augmentation_config.yaml
 
-With our current dataset:
-- Training: 948 cats, 1,991 dogs (2:1 ratio)
-- Generate 3 augmentations per cat: 948 × 3 = 2,844 additional cat images
-- Generate 1 augmentation per dog: 1,991 additional dog images
+# Or with custom settings
+python src/augment_dataset.py --cat-augmentations 3 --dog-augmentations 1
+```
 
-Final training set:
-- Original: 948 cats + 1,991 dogs = 2,939 images
-- Augmented: 2,844 cat augmentations + 1,991 dog augmentations = 4,835 images
-- Total: 7,774 images with approximately 3,792 cats and 3,982 dogs (balanced)
+### Analysis and Debugging
+```bash
+# Analyze the dataset statistics
+python src/dataset_analyzer.py data/processed
 
-## 7. Justification for Design Choices
+# Debug mask values
+python src/debug_mask_values.py
+```
 
-1. **Aspect-Preserving Resize with Padding**: Maintains all visual information without distortion, critical for accurate segmentation.
+## Mask Value Encoding
 
-2. **Horizontal Flips Only**: Vertical flips would create unrealistic animal orientations, potentially confusing the model.
+The masks use the following value encoding:
+- **0**: Background
+- **1**: Cat
+- **2**: Dog
+- **255**: Border/Don't care (used for pixels that should be ignored during training)
 
-3. **Limited Rotation Angles**: Large rotations could create unrealistic pet postures. Small rotations (±15° max) add variety while maintaining realism.
+## Configuration
 
-4. **Class-Specific Augmentation**: Addresses imbalance while ensuring each class gets appropriate transformations.
+The `config/augmentation_config.yaml` file contains detailed parameters for all augmentation operations, including:
+- Spatial transforms (flip, scale, rotate, shift)
+- Elastic transforms (for cats only)
+- Pixel-level transforms (brightness, contrast, hue, saturation)
+- Noise and blur effects
+- Lighting variations
 
-5. **Avoiding MixUp/CutMix**: These techniques blend class information, which could harm segmentation performance where clear boundaries are essential.
+## Notes on Implementation
 
-6. **Mild Elastic Deformations (Cats Only)**: Elastic transforms can help with generalization but must be mild to preserve recognizable features.
+- Augmentation uses the Albumentations library for fast, reliable image transforms
+- Masks are processed with `cv2.INTER_NEAREST` interpolation to preserve exact class values
+- The augmentation process creates new directories for augmented data while preserving originals
+- All augmentations maintain image-mask correspondence
 
-7. **Creating New Directories**: Keeps original data intact while clearly organizing augmented data.
+## License
 
-This strategy balances the need for data augmentation with the preservation of semantic information critical for successful segmentation. The approach aligns with the professor's guidance to evaluate in the original domain while providing sufficient model-ready training data.
+This project is distributed under the MIT License. See the `LICENSE` file for more information.
+
+## Acknowledgments
+
+The Oxford-IIIT Pet Dataset was created by Parkhi et al:
+- O. M. Parkhi, A. Vedaldi, A. Zisserman, C. V. Jawahar, "Cats and Dogs," IEEE Conference on Computer Vision and Pattern Recognition, 2012.
