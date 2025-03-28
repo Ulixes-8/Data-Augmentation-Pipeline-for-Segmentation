@@ -31,7 +31,7 @@ from tqdm import tqdm
 project_root = Path(__file__).resolve().parents[1]
 sys.path.append(str(project_root))
 
-from src.utils.helpers import create_directory, seed_everything
+from utils.helpers import create_directory, seed_everything
 
 
 def setup_logging(log_file: Optional[str] = None) -> logging.Logger:

@@ -35,7 +35,8 @@ from tqdm import tqdm
 project_root = Path(__file__).resolve().parents[1]
 sys.path.append(str(project_root))
 
-from src.utils.helpers import create_directory, seed_everything
+#from the utils directory, import the create_directory and seed_everything functions
+from utils.helpers import create_directory, seed_everything
 
 
 def setup_logging(log_file: Optional[str] = None) -> logging.Logger:
@@ -317,21 +318,51 @@ def create_augmentation_pipelines(config: Dict[str, Any]) -> Tuple[A.Compose, A.
     return cat_transform, dog_transform
 
 
-def get_class_from_mask(mask: np.ndarray) -> int:
+def get_class_from_mask(mask: np.ndarray, filename: str = None) -> int:
     """
-    Determine if a mask contains a cat (1) or dog (2).
+    Determine if a mask contains a cat (1) or dog (2) based on filename.
     
     Args:
         mask: Numpy array containing mask data
+        filename: Original filename to check breed
         
     Returns:
         1 for cat, 2 for dog, 0 if neither could be determined
     """
-    # Check for presence of class 1 (cat) or class 2 (dog)
+    # Complete list of cat breeds
+    cat_breeds = [
+        'abyssinian', 'bengal', 'birman', 'bombay', 
+        'british_shorthair', 'egyptian_mau', 'maine_coon', 
+        'persian', 'ragdoll', 'russian_blue', 'siamese', 'sphynx'
+    ]
+    
+    # Complete list of dog breeds
+    dog_breeds = [
+        'american_bulldog', 'american_pit_bull_terrier', 
+        'basset_hound', 'beagle', 'boxer', 'chihuahua', 
+        'english_cocker_spaniel', 'english_setter', 
+        'german_shorthaired', 'great_pyrenees', 'havanese', 
+        'japanese_chin', 'keeshond', 'leonberger', 
+        'miniature_pinscher', 'newfoundland', 'pomeranian', 
+        'pug', 'saint_bernard', 'samoyed', 'scottish_terrier', 
+        'shiba_inu', 'staffordshire_bull_terrier', 
+        'wheaten_terrier', 'yorkshire_terrier'
+    ]
+    
+    if filename:
+        filename_lower = filename.lower()
+        # Check if filename contains a known cat breed
+        if any(breed.lower() in filename_lower for breed in cat_breeds):
+            return 1  # Cat
+        # Check if filename contains a known dog breed
+        elif any(breed.lower() in filename_lower for breed in dog_breeds):
+            return 2  # Dog
+    
+    # If no breed detected from filename, check mask values as fallback
     unique_values = np.unique(mask)
-    if 1 in unique_values or 128 in unique_values:  # Cat classes
+    if 1 in unique_values:
         return 1  # Cat
-    elif 2 in unique_values:  # Dog class
+    elif 2 in unique_values:
         return 2  # Dog
     else:
         return 0  # Unknown
@@ -415,6 +446,8 @@ def load_image_and_mask(
     if image.shape[:2] != mask.shape[:2]:
         mask = resize_mask_to_match_image(mask, image.shape[:2], logger)
     
+    print(f"DEBUG - Raw mask from {mask_path.name}, values: {np.unique(mask)}")
+
     return image, mask
 
 
@@ -638,6 +671,7 @@ def augment_dataset(args: argparse.Namespace, logger: logging.Logger) -> None:
         try:
             # Get corresponding mask
             mask_path = mask_dict.get(img_path.stem)
+            # Determine class (cat or dog)
             if not mask_path:
                 logger.warning(f"No mask found for image: {img_path.name}, skipping")
                 continue
@@ -652,7 +686,9 @@ def augment_dataset(args: argparse.Namespace, logger: logging.Logger) -> None:
                 continue
             
             # Determine class (cat or dog)
-            class_id = get_class_from_mask(mask)
+            # class_id = get_class_from_mask(mask)
+            class_id = get_class_from_mask(mask, img_path.name)
+
             
             if class_id == 1:  # Cat
                 cat_count += 1
